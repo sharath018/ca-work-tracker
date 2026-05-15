@@ -12,6 +12,8 @@ from ca_tracker.config import (
 )
 from ca_tracker.database import DatabaseManager
 from ca_tracker.utils import get_db_path, get_backup_path, get_logger
+from ca_tracker.ui.filters import DateRangeFilter, FilterState
+from ca_tracker.ui.reports import MonthlySummaryReport, SummaryReportWindow
 
 logger = get_logger()
 
@@ -36,6 +38,7 @@ class MainWindow:
         self.root.minsize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         
         self.selected_id = None
+        self.filter_state = FilterState()  # Track current filter state
         
         # Initialize database
         try:
@@ -158,20 +161,41 @@ class MainWindow:
         filter_frame = tk.LabelFrame(self.root, text="Search & Filters", padx=10, pady=10)
         filter_frame.pack(fill="x", padx=10, pady=5)
         
-        tk.Label(filter_frame, text="Search").pack(side="left", padx=5)
-        self.search_entry = tk.Entry(filter_frame, width=30)
+        # Row 1: Search
+        search_row = tk.Frame(filter_frame)
+        search_row.pack(fill="x", pady=5)
+        
+        tk.Label(search_row, text="Search").pack(side="left", padx=5)
+        self.search_entry = tk.Entry(search_row, width=30)
         self.search_entry.pack(side="left", padx=5)
         
-        tk.Button(filter_frame, text="Search", command=self.search_data).pack(side="left", padx=5)
-        tk.Button(filter_frame, text="Show All", command=self.load_data).pack(side="left", padx=5)
+        tk.Button(search_row, text="Search", command=self.search_data).pack(side="left", padx=5)
+        tk.Button(search_row, text="Show All", command=self.load_data).pack(side="left", padx=5)
         
-        tk.Label(filter_frame, text="Status Filter").pack(side="left", padx=10)
+        tk.Label(search_row, text="Status Filter").pack(side="left", padx=10)
         self.filter_status = ttk.Combobox(
-            filter_frame, values=[""] + STATUS_OPTIONS, width=15
+            search_row, values=[""] + STATUS_OPTIONS, width=15
         )
         self.filter_status.pack(side="left", padx=5)
         
-        tk.Button(filter_frame, text="Apply Filter", command=self.filter_data).pack(side="left", padx=5)
+        tk.Button(search_row, text="Apply Filter", command=self.filter_data).pack(side="left", padx=5)
+        
+        # Row 2: Date Range Filter
+        date_filter_row = tk.Frame(filter_frame)
+        date_filter_row.pack(fill="x", pady=5)
+        
+        self.date_range_filter = DateRangeFilter(date_filter_row, callback=self.filter_by_date_range)
+        self.date_range_filter.pack()
+        
+        tk.Button(
+            date_filter_row, text="Apply Date Range", 
+            command=self.filter_by_date_range, width=15
+        ).pack(side="left", padx=5)
+        
+        tk.Button(
+            date_filter_row, text="Monthly Summary", 
+            command=self.show_monthly_summary, width=15, bg="#FF9800", fg="white"
+        ).pack(side="left", padx=5)
         
         # Table with scrollbars
         table_frame = tk.Frame(self.root)
@@ -413,6 +437,9 @@ class MainWindow:
             billable_display = "Yes" if row[6] else "No"
             display_row = (row[0], row[1], row[2], row[3], row[4], row[5], billable_display, row[7], row[8], row[9], row[10])
             self.tree.insert("", tk.END, values=display_row)
+        
+        # Update filter state
+        self.filter_state.set_search(keyword)
     
     def filter_data(self):
         """Filter work entries by status."""
@@ -426,8 +453,10 @@ class MainWindow:
                 "SELECT * FROM work_log WHERE status=? ORDER BY date DESC",
                 (status,)
             )
+            self.filter_state.set_status_filter(status)
         else:
             self.db.execute("SELECT * FROM work_log ORDER BY date DESC")
+            self.filter_state.clear()
         
         rows = self.db.fetchall()
         
@@ -482,7 +511,7 @@ class MainWindow:
             logger.error(f"Error updating dashboard: {e}")
     
     def export_csv(self):
-        """Export work entries to CSV."""
+        """Export work entries to CSV (respects current filter)."""
         file_path = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV Files", "*.csv")]
@@ -492,7 +521,15 @@ class MainWindow:
             return
         
         try:
-            self.db.execute("SELECT * FROM work_log ORDER BY date DESC")
+            # Build query based on current filter
+            where_clause, params = self.filter_state.get_sql_clause()
+            
+            if where_clause:
+                query = f"SELECT * FROM work_log {where_clause} ORDER BY date DESC"
+            else:
+                query = "SELECT * FROM work_log ORDER BY date DESC"
+            
+            self.db.execute(query, params)
             rows = self.db.fetchall()
             
             with open(file_path, mode="w", newline="", encoding="utf-8") as f:
@@ -519,7 +556,7 @@ class MainWindow:
             messagebox.showerror("Export Error", f"Failed to export CSV: {e}")
     
     def export_pdf(self):
-        """Export work entries to PDF."""
+        """Export work entries to PDF (respects current filter)."""
         if not REPORTLAB_AVAILABLE:
             messagebox.showerror("Error", "reportlab is not installed.\nRun: pip install reportlab")
             return
@@ -541,7 +578,15 @@ class MainWindow:
             elements.append(title)
             elements.append(Spacer(1, 12))
             
-            self.db.execute("SELECT * FROM work_log ORDER BY date DESC")
+            # Build query based on current filter
+            where_clause, params = self.filter_state.get_sql_clause()
+            
+            if where_clause:
+                query = f"SELECT * FROM work_log {where_clause} ORDER BY date DESC"
+            else:
+                query = "SELECT * FROM work_log ORDER BY date DESC"
+            
+            self.db.execute(query, params)
             rows = self.db.fetchall()
             
             data = [[
@@ -592,6 +637,61 @@ class MainWindow:
         self.status_combo.set("")
         self.requested_by_entry.delete(0, tk.END)
         self.notes_entry.delete(0, tk.END)
+    
+    def filter_by_date_range(self):
+        """Filter work entries by date range."""
+        from_date, to_date = self.date_range_filter.get_range()
+        
+        if not from_date or not to_date:
+            messagebox.showerror("Error", "Invalid date format. Use DD-MMM-YYYY")
+            return
+        
+        if from_date > to_date:
+            messagebox.showerror("Error", "From date must be before To date")
+            return
+        
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+        
+        from_str = from_date.strftime(DATE_FORMAT)
+        to_str = to_date.strftime(DATE_FORMAT)
+        
+        self.db.execute(
+            "SELECT * FROM work_log WHERE date BETWEEN ? AND ? ORDER BY date DESC",
+            (from_str, to_str)
+        )
+        
+        rows = self.db.fetchall()
+        
+        for row in rows:
+            billable_display = "Yes" if row[6] else "No"
+            display_row = (row[0], row[1], row[2], row[3], row[4], row[5], billable_display, row[7], row[8], row[9], row[10])
+            self.tree.insert("", tk.END, values=display_row)
+        
+        # Update filter state
+        self.filter_state.set_date_range(from_date, to_date)
+        
+        logger.info(f"Filtered by date range: {from_str} to {to_str}")
+    
+    def show_monthly_summary(self):
+        """Show monthly summary report."""
+        from_date, to_date = self.date_range_filter.get_range()
+        
+        if not from_date or not to_date:
+            messagebox.showerror("Error", "Invalid date format. Use DD-MMM-YYYY")
+            return
+        
+        if from_date > to_date:
+            messagebox.showerror("Error", "From date must be before To date")
+            return
+        
+        try:
+            report = MonthlySummaryReport(self.db, from_date, to_date)
+            SummaryReportWindow(self.root, report)
+            logger.info(f"Generated monthly summary for {from_date.strftime(DATE_FORMAT)} to {to_date.strftime(DATE_FORMAT)}")
+        except Exception as e:
+            logger.error(f"Error generating summary report: {e}")
+            messagebox.showerror("Error", f"Failed to generate report: {e}")
     
     def on_closing(self):
         """Handle application closing."""
