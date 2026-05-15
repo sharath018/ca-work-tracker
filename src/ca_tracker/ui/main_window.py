@@ -26,6 +26,15 @@ except ImportError:
     REPORTLAB_AVAILABLE = False
     logger.warning("reportlab not installed - PDF export will be unavailable")
 
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+    logger.warning("openpyxl not installed - Excel export will be unavailable")
+
 
 class MainWindow:
     """Main application window for CA Work Tracker."""
@@ -39,6 +48,7 @@ class MainWindow:
         
         self.selected_id = None
         self.filter_state = FilterState()  # Track current filter state
+        self.client_suggestions = []
         
         # Initialize database
         try:
@@ -89,9 +99,10 @@ class MainWindow:
         self.date_entry.insert(0, datetime.now().strftime(DATE_FORMAT))
         
         tk.Label(form_frame, text="Client").grid(row=0, column=1, sticky="w")
-        self.client_entry = tk.Entry(form_frame, width=25)
-        self.client_entry.grid(row=1, column=1, padx=5, pady=5)
-        
+        self.client_combo = ttk.Combobox(form_frame, values=[], width=25)
+        self.client_combo.grid(row=1, column=1, padx=5, pady=5)
+        self.client_combo.bind('<KeyRelease>', self.update_client_suggestions)
+
         tk.Label(form_frame, text="Category").grid(row=0, column=2, sticky="w")
         self.category_combo = ttk.Combobox(form_frame, values=CATEGORIES, width=20)
         self.category_combo.grid(row=1, column=2, padx=5, pady=5)
@@ -150,6 +161,10 @@ class MainWindow:
         
         tk.Button(
             button_frame, text="Export CSV", command=self.export_csv, width=12
+        ).pack(side="left", padx=5)
+
+        tk.Button(
+            button_frame, text="Export Excel", command=self.export_excel, width=12
         ).pack(side="left", padx=5)
         
         if REPORTLAB_AVAILABLE:
@@ -236,7 +251,7 @@ class MainWindow:
         """Add a new work entry."""
         try:
             # Validation
-            if not self.client_entry.get().strip():
+            if not self.client_combo.get().strip():
                 messagebox.showwarning("Validation Error", "Client name is required.")
                 return
             if not self.category_combo.get().strip():
@@ -273,7 +288,7 @@ class MainWindow:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 date_str,
-                self.client_entry.get(),
+                self.client_combo.get(),
                 self.category_combo.get(),
                 self.summary_entry.get(),
                 hours,
@@ -295,12 +310,16 @@ class MainWindow:
         except Exception as e:
             logger.error(f"Error adding entry: {e}")
             messagebox.showerror("Error", f"Failed to add entry: {e}")
+        finally:
+            self.refresh_client_suggestions()
     
     def load_data(self):
         """Load all work entries into the table."""
         for row in self.tree.get_children():
             self.tree.delete(row)
         
+        self.filter_state.clear()
+        self.refresh_client_suggestions()
         self.db.execute("SELECT * FROM work_log ORDER BY date DESC, id DESC")
         rows = self.db.fetchall()
         
@@ -322,8 +341,7 @@ class MainWindow:
         self.date_entry.delete(0, tk.END)
         self.date_entry.insert(0, values[1])
         
-        self.client_entry.delete(0, tk.END)
-        self.client_entry.insert(0, values[2])
+        self.client_combo.set(values[2])
         
         self.category_combo.set(values[3])
         
@@ -345,6 +363,8 @@ class MainWindow:
         
         self.notes_entry.delete(0, tk.END)
         self.notes_entry.insert(0, values[10])
+        
+        self.refresh_client_suggestions()
     
     def update_entry(self):
         """Update the selected work entry."""
@@ -387,7 +407,7 @@ class MainWindow:
                 WHERE id=?
             """, (
                 date_str,
-                self.client_entry.get(),
+                self.client_combo.get(),
                 self.category_combo.get(),
                 self.summary_entry.get(),
                 hours,
@@ -410,6 +430,8 @@ class MainWindow:
         except Exception as e:
             logger.error(f"Error updating entry: {e}")
             messagebox.showerror("Error", f"Failed to update entry: {e}")
+        finally:
+            self.refresh_client_suggestions()
     
     def search_data(self):
         """Search for work entries."""
@@ -555,6 +577,60 @@ class MainWindow:
             logger.error(f"Error exporting CSV: {e}")
             messagebox.showerror("Export Error", f"Failed to export CSV: {e}")
     
+    def export_excel(self):
+        """Export work entries to Excel .xlsx (respects current filter)."""
+        if not OPENPYXL_AVAILABLE:
+            messagebox.showerror("Error", "openpyxl is not installed.\nRun: pip install openpyxl")
+            return
+        
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel Workbook", "*.xlsx")]
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            where_clause, params = self.filter_state.get_sql_clause()
+            query = f"SELECT * FROM work_log {where_clause} ORDER BY date DESC" if where_clause else "SELECT * FROM work_log ORDER BY date DESC"
+            self.db.execute(query, params)
+            rows = self.db.fetchall()
+            
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "Work Log"
+            
+            headers = [
+                "ID", "Date", "Client", "Category", "Summary",
+                "Hours", "Billable", "Amount", "Status",
+                "Requested By", "Notes", "Created", "Updated"
+            ]
+            sheet.append(headers)
+            
+            for row in rows:
+                billable_display = "Yes" if row[6] else "No"
+                sheet.append([
+                    row[0], row[1], row[2], row[3], row[4],
+                    row[5], billable_display, row[7], row[8],
+                    row[9], row[10], row[11], row[12]
+                ])
+            
+            bold_font = Font(bold=True)
+            for cell in sheet[1]:
+                cell.font = bold_font
+            
+            column_widths = [12, 15, 25, 20, 40, 10, 12, 15, 15, 25, 35, 20, 20]
+            for i, width in enumerate(column_widths, start=1):
+                sheet.column_dimensions[get_column_letter(i)].width = width
+            
+            workbook.save(file_path)
+            messagebox.showinfo("Success", "Excel exported successfully")
+            logger.info(f"Excel export completed: {file_path}")
+        except Exception as e:
+            logger.error(f"Error exporting Excel: {e}")
+            messagebox.showerror("Export Error", f"Failed to export Excel: {e}")
+        
     def export_pdf(self):
         """Export work entries to PDF (respects current filter)."""
         if not REPORTLAB_AVAILABLE:
@@ -628,7 +704,7 @@ class MainWindow:
         self.date_entry.delete(0, tk.END)
         self.date_entry.insert(0, datetime.now().strftime(DATE_FORMAT))
         
-        self.client_entry.delete(0, tk.END)
+        self.client_combo.set("")
         self.category_combo.set("")
         self.summary_entry.delete(0, tk.END)
         self.hours_entry.delete(0, tk.END)
@@ -638,6 +714,32 @@ class MainWindow:
         self.requested_by_entry.delete(0, tk.END)
         self.notes_entry.delete(0, tk.END)
     
+    def get_client_list(self):
+        """Return distinct client names for autocomplete suggestions."""
+        try:
+            self.db.execute(
+                "SELECT DISTINCT client FROM work_log WHERE client IS NOT NULL AND client != '' ORDER BY client COLLATE NOCASE ASC"
+            )
+            rows = self.db.fetchall()
+            return [row[0] for row in rows if row[0]]
+        except Exception as e:
+            logger.warning(f"Unable to refresh client suggestions: {e}")
+            return []
+
+    def refresh_client_suggestions(self):
+        """Refresh the client autocomplete values."""
+        self.client_suggestions = self.get_client_list()
+        self.client_combo['values'] = self.client_suggestions
+
+    def update_client_suggestions(self, event=None):
+        """Filter autocomplete options as the user types."""
+        typed = self.client_combo.get().strip().lower()
+        if typed and self.client_suggestions:
+            filtered = [client for client in self.client_suggestions if typed in client.lower()]
+            self.client_combo['values'] = filtered
+        else:
+            self.client_combo['values'] = self.client_suggestions
+
     def filter_by_date_range(self):
         """Filter work entries by date range."""
         from_date, to_date = self.date_range_filter.get_range()

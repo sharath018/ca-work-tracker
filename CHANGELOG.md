@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.2.0] - 2026-05-16
+
+### Phase 3 Implementation - Feature Development
+
+#### Added
+- **Excel Export** - Export filtered work entries to a formatted `.xlsx` workbook
+  - Includes headers, column widths, and bold header formatting
+  - Respects current filters (search, status, date range)
+- **Client Autocomplete** - Client field now uses a combobox with suggestion filtering
+  - Suggestions are sourced from distinct existing client names in the database
+  - Auto-suggest updates after add/update operations
+
+#### Fixed
+- **Filter state reset** - "Show All" now clears previous filters before reloading the full dataset
+- **Client entry behavior** - Client field now supports autocomplete and persists suggested values correctly
+
+#### Dependency Updates
+- Added `openpyxl>=3.1.0` for Excel workbook export support
+
 ## [1.1.0] - 2025-02-15
 
 ### Phase 2 Implementation - Feature Enhancements
