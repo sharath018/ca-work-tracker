@@ -39,8 +39,9 @@ jobs:
     
     - name: Create installer with Inno Setup
       run: |
-        "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\CA_Work_Tracker.iss
-      shell: cmd
+        $version = "${{ github.ref_name }}".TrimStart("v")
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" installer\CA_Work_Tracker.iss
+      shell: powershell
     
     - name: Verify installer was created
       run: |
@@ -75,7 +76,7 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: ${{ github.ref }}
+        tag_name: ${{ github.ref_name }}
         name: CA Work Tracker ${{ steps.changelog.outputs.version }}
         body: ${{ steps.changelog.outputs.notes }}
         files: installer/output/CA_Work_Tracker_Installer.exe

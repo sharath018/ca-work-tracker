@@ -31,14 +31,19 @@ icon_path = str(spec_dir / "assets" / "app_icon.ico")
 if not Path(icon_path).exists():
     icon_path = None  # No icon if file doesn't exist
 
+datas = [
+    (str(spec_dir / "version.txt"), "."),
+]
+
+assets_dir = spec_dir / "assets"
+if assets_dir.exists():
+    datas.append((str(assets_dir), "assets"))
+
 a = Analysis(
     [str(src_dir / "main.py")],
     pathex=[str(src_dir)],
     binaries=[],
-    datas=[
-        (str(spec_dir / "assets"), "assets"),
-        (str(spec_dir / "version.txt"), "."),
-    ],
+    datas=datas,
     hiddenimports=[
         "tkinter",
         "reportlab",

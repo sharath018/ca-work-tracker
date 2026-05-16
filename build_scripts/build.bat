@@ -13,7 +13,7 @@ where pyinstaller >nul 2>nul
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: PyInstaller is not installed
     echo Please run: pip install pyinstaller
-    pause
+    if not defined CI pause
     exit /b 1
 )
 
@@ -41,8 +41,8 @@ if %ERRORLEVEL% EQU 0 (
     echo.
     echo ERROR: Build failed
     echo Please check the output above for details
-    pause
+    if not defined CI pause
     exit /b 1
 )
 
-pause
+if not defined CI pause
