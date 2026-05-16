@@ -14,8 +14,8 @@ Compression=lzma
 SolidCompression=yes
 
 [Files]
-; Adjust the Source path to point to the PyInstaller --onedir output (dist\CA_Work_Tracker\)
-Source: "dist\CA_Work_Tracker\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
+; Inno Setup resolves this path relative to the installer script directory.
+Source: "..\dist\CA_Work_Tracker\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
