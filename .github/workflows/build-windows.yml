@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*.*.*'  # Trigger on semantic version tags: v1.0.0, v1.0.1, etc.
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build on Windows
