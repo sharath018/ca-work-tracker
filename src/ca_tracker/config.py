@@ -56,6 +56,10 @@ DB_CHECK_SAME_THREAD = False
 # Backup configuration
 BACKUP_MAX_FILES = 30  # Keep max 30 daily backups
 
+# Optional database encryption (requires pysqlcipher3)
+ENCRYPT_DB = False
+DB_PASSWORD = None
+
 
 def get_db_path():
     """Get the path to the database file."""

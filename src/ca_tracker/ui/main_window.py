@@ -49,6 +49,10 @@ class MainWindow:
         self.selected_id = None
         self.filter_state = FilterState()  # Track current filter state
         self.client_suggestions = []
+        self.page_size = 200
+        self.current_page = 0
+        self.total_records = 0
+        self.last_saved = None
         
         # Initialize database
         try:
@@ -64,6 +68,8 @@ class MainWindow:
         self.create_ui()
         self.load_data()
         self.update_dashboard()
+
+        self.update_status_bar()
         
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
     
@@ -246,6 +252,19 @@ class MainWindow:
         table_frame.grid_columnconfigure(0, weight=1)
         
         self.tree.bind("<Double-1>", self.select_record)
+
+        # Status bar / pagination
+        status_frame = tk.Frame(self.root, relief=tk.SUNKEN, bd=1)
+        status_frame.pack(fill="x", side="bottom")
+
+        self.status_label = tk.Label(status_frame, text="Ready")
+        self.status_label.pack(side="left", padx=8)
+
+        self.page_label = tk.Label(status_frame, text="Page 1")
+        self.page_label.pack(side="right", padx=8)
+
+        tk.Button(status_frame, text="Prev", command=self.go_prev_page).pack(side="right")
+        tk.Button(status_frame, text="Next", command=self.go_next_page).pack(side="right")
     
     def add_entry(self):
         """Add a new work entry."""
@@ -300,12 +319,19 @@ class MainWindow:
             ))
             
             self.db.commit()
-            self.load_data()
+            self.current_page = 0
+            self.reload_current_view()
+            self.last_saved = datetime.now()
+            self.update_status_bar()
             self.update_dashboard()
             self.clear_form()
             
             messagebox.showinfo("Success", "Entry added successfully")
             logger.info("New work entry added")
+            try:
+                self.db.log_audit('INSERT', 'work_log', None, f"Added entry for client={self.client_combo.get()}")
+            except Exception:
+                pass
             
         except Exception as e:
             logger.error(f"Error adding entry: {e}")
@@ -315,18 +341,10 @@ class MainWindow:
     
     def load_data(self):
         """Load all work entries into the table."""
-        for row in self.tree.get_children():
-            self.tree.delete(row)
-        
         self.filter_state.clear()
+        self.current_page = 0
         self.refresh_client_suggestions()
-        self.db.execute("SELECT * FROM work_log ORDER BY date DESC, id DESC")
-        rows = self.db.fetchall()
-        
-        for row in rows:
-            billable_display = "Yes" if row[6] else "No"
-            display_row = (row[0], row[1], row[2], row[3], row[4], row[5], billable_display, row[7], row[8], row[9], row[10])
-            self.tree.insert("", tk.END, values=display_row)
+        self.reload_current_view()
     
     def select_record(self, event):
         """Select a record by double-clicking."""
@@ -420,12 +438,19 @@ class MainWindow:
             ))
             
             self.db.commit()
-            self.load_data()
+            self.current_page = 0
+            self.reload_current_view()
+            self.last_saved = datetime.now()
+            self.update_status_bar()
             self.update_dashboard()
             self.clear_form()
             
             messagebox.showinfo("Success", "Record updated successfully")
             logger.info(f"Work entry {self.selected_id} updated")
+            try:
+                self.db.log_audit('UPDATE', 'work_log', self.selected_id, f"Updated record id={self.selected_id}")
+            except Exception:
+                pass
             
         except Exception as e:
             logger.error(f"Error updating entry: {e}")
@@ -441,6 +466,7 @@ class MainWindow:
             messagebox.showwarning("Warning", "Please enter a search term.")
             return
         
+        self.current_page = 0
         for row in self.tree.get_children():
             self.tree.delete(row)
         
@@ -462,30 +488,16 @@ class MainWindow:
         
         # Update filter state
         self.filter_state.set_search(keyword)
+        self.update_status_bar()
     
     def filter_data(self):
         """Filter work entries by status."""
         status = self.filter_status.get()
         
-        for row in self.tree.get_children():
-            self.tree.delete(row)
-        
-        if status:
-            self.db.execute(
-                "SELECT * FROM work_log WHERE status=? ORDER BY date DESC",
-                (status,)
-            )
-            self.filter_state.set_status_filter(status)
-        else:
-            self.db.execute("SELECT * FROM work_log ORDER BY date DESC")
-            self.filter_state.clear()
-        
-        rows = self.db.fetchall()
-        
-        for row in rows:
-            billable_display = "Yes" if row[6] else "No"
-            display_row = (row[0], row[1], row[2], row[3], row[4], row[5], billable_display, row[7], row[8], row[9], row[10])
-            self.tree.insert("", tk.END, values=display_row)
+        self.current_page = 0
+        self.filter_state.set_status_filter(status) if status else self.filter_state.clear()
+        self.reload_current_view()
+        self.update_status_bar()
     
     def delete_selected(self):
         """Delete the selected work entry."""
@@ -504,9 +516,16 @@ class MainWindow:
             try:
                 self.db.execute("DELETE FROM work_log WHERE id=?", (record_id,))
                 self.db.commit()
-                self.load_data()
+                self.current_page = 0
+                self.reload_current_view()
                 self.update_dashboard()
+                self.last_saved = datetime.now()
+                self.update_status_bar()
                 logger.info(f"Work entry {record_id} deleted")
+                try:
+                    self.db.log_audit('DELETE', 'work_log', record_id, f"Deleted record id={record_id}")
+                except Exception:
+                    pass
             except Exception as e:
                 logger.error(f"Error deleting entry: {e}")
                 messagebox.showerror("Error", f"Failed to delete entry: {e}")
@@ -531,6 +550,68 @@ class MainWindow:
             
         except Exception as e:
             logger.error(f"Error updating dashboard: {e}")
+
+    def _get_total_count(self, where_clause, params):
+        """Return total record count for current filter."""
+        try:
+            if where_clause:
+                query = f"SELECT COUNT(*) FROM work_log {where_clause}"
+                self.db.execute(query, params)
+            else:
+                self.db.execute("SELECT COUNT(*) FROM work_log")
+            return self.db.fetchone()[0] or 0
+        except Exception as e:
+            logger.warning(f"Unable to get total count: {e}")
+            return 0
+
+    def reload_current_view(self):
+        """Reload the tree view based on current filter_state and pagination."""
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+
+        where_clause, params = self.filter_state.get_sql_clause()
+        # Compute total
+        self.total_records = self._get_total_count(where_clause, params)
+
+        offset = self.current_page * self.page_size
+
+        if where_clause:
+            query = f"SELECT * FROM work_log {where_clause} ORDER BY date DESC LIMIT ? OFFSET ?"
+            exec_params = params + [self.page_size, offset]
+        else:
+            query = "SELECT * FROM work_log ORDER BY date DESC LIMIT ? OFFSET ?"
+            exec_params = [self.page_size, offset]
+
+        self.db.execute(query, exec_params)
+        rows = self.db.fetchall()
+
+        for row in rows:
+            billable_display = "Yes" if row[6] else "No"
+            display_row = (row[0], row[1], row[2], row[3], row[4], row[5], billable_display, row[7], row[8], row[9], row[10])
+            self.tree.insert("", tk.END, values=display_row)
+
+        total_pages = max(1, (self.total_records + self.page_size - 1) // self.page_size)
+        self.page_label.config(text=f"Page {self.current_page+1} / {total_pages}")
+        self.update_status_bar()
+
+    def go_prev_page(self):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.reload_current_view()
+
+    def go_next_page(self):
+        total_pages = max(1, (self.total_records + self.page_size - 1) // self.page_size)
+        if self.current_page < total_pages - 1:
+            self.current_page += 1
+            self.reload_current_view()
+
+    def update_status_bar(self):
+        """Update status bar text including last saved and record counts."""
+        parts = []
+        if self.last_saved:
+            parts.append(f"Last saved: {self.last_saved.strftime('%d-%b-%Y %H:%M:%S')}")
+        parts.append(f"Records: {self.total_records}")
+        self.status_label.config(text=" | ".join(parts))
     
     def export_csv(self):
         """Export work entries to CSV (respects current filter)."""

@@ -4,6 +4,14 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
 from ca_tracker.config import DATE_FORMAT
+import os
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except Exception:
+    MATPLOTLIB_AVAILABLE = False
 
 
 class MonthlySummaryReport:
@@ -135,6 +143,47 @@ class MonthlySummaryReport:
     def get_data_dict(self):
         """Get raw data dictionary for programmatic access."""
         return self.data
+
+    def generate_charts(self, output_dir):
+        """Generate simple summary charts (status pie, top categories bar) into output_dir.
+
+        Returns list of generated file paths.
+        """
+        paths = []
+        if not MATPLOTLIB_AVAILABLE:
+            return paths
+
+        try:
+            # Status pie chart
+            statuses = [(row[0], row[1]) for row in self.data.get('by_status', [])]
+            if statuses:
+                labels, counts = zip(*statuses)
+                fig, ax = plt.subplots(figsize=(6, 4))
+                ax.pie(counts, labels=labels, autopct='%1.1f%%', startangle=90)
+                ax.set_title('Entries by Status')
+                status_path = os.path.join(output_dir, f"summary_status_{self.from_date.strftime('%Y%m%d')}_{self.to_date.strftime('%Y%m%d')}.png")
+                fig.savefig(status_path, bbox_inches='tight')
+                plt.close(fig)
+                paths.append(status_path)
+
+            # Top categories bar chart
+            categories = [(row[0], row[2] or 0) for row in self.data.get('by_category', [])][:8]
+            if categories:
+                cats, amounts = zip(*categories)
+                fig, ax = plt.subplots(figsize=(8, 4))
+                ax.barh(cats, amounts, color='skyblue')
+                ax.set_xlabel('Amount (₹)')
+                ax.set_title('Top Categories by Amount')
+                fig.tight_layout()
+                cat_path = os.path.join(output_dir, f"summary_categories_{self.from_date.strftime('%Y%m%d')}_{self.to_date.strftime('%Y%m%d')}.png")
+                fig.savefig(cat_path, bbox_inches='tight')
+                plt.close(fig)
+                paths.append(cat_path)
+
+        except Exception:
+            pass
+
+        return paths
 
 
 class SummaryReportWindow:

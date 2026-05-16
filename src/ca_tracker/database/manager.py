@@ -42,22 +42,46 @@ class DatabaseManager:
         Creates a new database if it doesn't exist.
         """
         try:
-            self.conn = sqlite3.connect(
-                self.db_path,
-                timeout=DB_TIMEOUT,
-                check_same_thread=DB_CHECK_SAME_THREAD
-            )
+            # Attempt to open encrypted DB if configured (optional, requires pysqlcipher3)
+            try:
+                from ca_tracker.config import ENCRYPT_DB, DB_PASSWORD
+            except Exception:
+                ENCRYPT_DB = False
+                DB_PASSWORD = None
+
+            if ENCRYPT_DB:
+                try:
+                    from pysqlcipher3 import dbapi2 as sqlcipher
+                    self.conn = sqlcipher.connect(self.db_path)
+                    self.cursor = self.conn.cursor()
+                    if DB_PASSWORD:
+                        self.cursor.execute(f"PRAGMA key = '{DB_PASSWORD}';")
+                except Exception as e:
+                    logger.warning(f"SQLCipher not available or failed: {e}. Falling back to sqlite3.")
+                    self.conn = sqlite3.connect(
+                        self.db_path,
+                        timeout=DB_TIMEOUT,
+                        check_same_thread=DB_CHECK_SAME_THREAD
+                    )
+            else:
+                self.conn = sqlite3.connect(
+                    self.db_path,
+                    timeout=DB_TIMEOUT,
+                    check_same_thread=DB_CHECK_SAME_THREAD
+                )
             self.conn.row_factory = sqlite3.Row
             self.cursor = self.conn.cursor()
             
             # Enable foreign keys
             self.cursor.execute("PRAGMA foreign_keys = ON")
             
-            # Create schema if new database
-            if not self._table_exists("work_log"):
-                logger.info("Creating new database schema")
+            # Ensure schema is created/updated (runs safely on existing DBs)
+            try:
+                logger.info("Ensuring database schema is present/updated")
                 create_schema(self.cursor)
                 self.conn.commit()
+            except Exception as e:
+                logger.warning(f"Schema creation/migration step failed: {e}")
             
             logger.info(f"Successfully connected to database: {self.db_path}")
             return True
@@ -155,6 +179,22 @@ class DatabaseManager:
             logger.error(f"Error committing transaction: {e}")
             return False
         return False
+
+    def log_audit(self, action, table_name, record_id=None, details=None, user=None):
+        """
+        Insert an audit record into the audit_log table.
+        """
+        try:
+            self.execute(
+                """
+                INSERT INTO audit_log (action, table_name, record_id, details, user)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (action, table_name, record_id, details, user)
+            )
+            self.commit()
+        except Exception as e:
+            logger.warning(f"Failed to write audit log: {e}")
     
     def rollback(self):
         """Rollback the current transaction."""
