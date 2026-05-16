@@ -14,6 +14,8 @@ from ca_tracker.database import DatabaseManager
 from ca_tracker.utils import get_db_path, get_backup_path, get_logger
 from ca_tracker.ui.filters import DateRangeFilter, FilterState
 from ca_tracker.ui.reports import MonthlySummaryReport, SummaryReportWindow
+from ca_tracker.ui.update_dialog import UpdateCheckWindow, VersionCheckNoUpdateWindow
+from ca_tracker.utils.version_checker import VersionChecker
 
 logger = get_logger()
 
@@ -53,6 +55,7 @@ class MainWindow:
         self.current_page = 0
         self.total_records = 0
         self.last_saved = None
+        self.version_checker = VersionChecker(APP_VERSION)
         
         # Initialize database
         try:
@@ -75,6 +78,17 @@ class MainWindow:
     
     def create_ui(self):
         """Create the user interface."""
+        # Menu bar
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="Check for Updates", command=self.check_for_updates)
+        help_menu.add_separator()
+        help_menu.add_command(label="About CA Work Tracker", command=self.show_about)
+
         # Dashboard
         dashboard_frame = tk.LabelFrame(self.root, text="Dashboard", padx=10, pady=10)
         dashboard_frame.pack(fill="x", padx=10, pady=5)
@@ -885,3 +899,37 @@ class MainWindow:
             logger.error(f"Error closing application: {e}")
         finally:
             self.root.destroy()
+
+    def check_for_updates(self):
+        """Check for updates from GitHub."""
+        try:
+            has_update, latest_version, release_url, error = self.version_checker.check_for_updates(
+                force=True
+            )
+            if error:
+                messagebox.showerror("Update Check Failed", f"Error checking for updates:\n{error}")
+                return
+
+            if has_update:
+                release_notes = self.version_checker.get_release_notes(release_url)
+                UpdateCheckWindow(
+                    self.root, APP_VERSION, latest_version, release_url, release_notes
+                )
+                logger.info(f"Update available: {latest_version}")
+            else:
+                VersionCheckNoUpdateWindow(self.root, APP_VERSION)
+                logger.info("No update available")
+
+        except Exception as e:
+            logger.error(f"Error checking for updates: {e}")
+            messagebox.showerror("Error", f"Failed to check for updates: {e}")
+
+    def show_about(self):
+        """Show about dialog."""
+        messagebox.showinfo(
+            "About CA Work Tracker",
+            f"CA Work Tracker v{APP_VERSION}\n\n"
+            f"A professional work logging and billing tracker for Chartered Accountants.\n\n"
+            f"© 2025-2026\n"
+            f"For updates, visit: https://github.com/sharath018/ca-work-tracker",
+        )
