@@ -23,7 +23,6 @@ wheels/
 
 # PyInstaller
 *.manifest
-*.spec
 
 # Unit test / coverage
 .coverage
