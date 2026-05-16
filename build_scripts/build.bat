@@ -19,13 +19,13 @@ if %ERRORLEVEL% NEQ 0 (
 
 REM Clean previous builds
 echo Cleaning previous builds...
-if exist dist rmdir /s /q dist
-if exist build rmdir /s /q build
+if exist ..\dist rmdir /s /q ..\dist
+if exist ..\build rmdir /s /q ..\build
 
 REM Run PyInstaller
 echo.
 echo Building CA Work Tracker...
-pyinstaller --clean ca_tracker.spec
+pyinstaller --clean ../ca_tracker.spec
 
 if %ERRORLEVEL% EQU 0 (
     echo.
@@ -33,8 +33,8 @@ if %ERRORLEVEL% EQU 0 (
     echo Build completed successfully!
     echo ============================================
     echo.
-    echo Output folder: dist\CA_Work_Tracker
-    echo Executable: dist\CA_Work_Tracker\CA_Work_Tracker.exe
+    echo Output folder: ..\dist\CA_Work_Tracker
+    echo Executable: ..\dist\CA_Work_Tracker\main.exe
     echo.
 ) else (
     echo.
