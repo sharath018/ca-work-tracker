@@ -65,6 +65,23 @@ def create_schema(cursor):
         if not cursor.fetchone():
             cursor.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
         
+        # Audit log for changes (add/update/delete)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                table_name TEXT NOT NULL,
+                record_id INTEGER,
+                details TEXT,
+                user TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp
+            ON audit_log(timestamp)
+        """)
+        
         logger.info("Database schema created/verified successfully")
         
     except sqlite3.Error as e:
