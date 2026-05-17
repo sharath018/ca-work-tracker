@@ -30,7 +30,7 @@ REM Run PyInstaller from root directory
 echo.
 echo Building CA Work Tracker...
 echo Ensuring tkinter runtime hook is available...
-pyinstaller --clean --onedir ca_tracker.spec
+pyinstaller --clean ca_tracker.spec
 
 if %ERRORLEVEL% EQU 0 (
     echo.
