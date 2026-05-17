@@ -22,11 +22,15 @@ echo Cleaning previous builds...
 cd ..
 if exist dist rmdir /s /q dist
 if exist build rmdir /s /q build
+if exist "*.spec" (
+    REM Don't delete the spec file, just keep it
+)
 
 REM Run PyInstaller from root directory
 echo.
 echo Building CA Work Tracker...
-pyinstaller --clean ca_tracker.spec
+echo Ensuring tkinter runtime hook is available...
+pyinstaller --clean --onedir ca_tracker.spec
 
 if %ERRORLEVEL% EQU 0 (
     echo.

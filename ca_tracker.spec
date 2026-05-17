@@ -19,6 +19,7 @@ For code signing:
 
 import sys
 from pathlib import Path
+import tkinter as tk
 
 block_cipher = None
 
@@ -31,9 +32,25 @@ icon_path = str(spec_dir / "assets" / "app_icon.ico")
 if not Path(icon_path).exists():
     icon_path = None  # No icon if file doesn't exist
 
+# Get tkinter's tcl/tk data directory
+try:
+    tk_root = Path(tk.__file__).parent
+    tcl_lib = tk_root / "tcl8.6"
+    if tcl_lib.exists():
+        tcl_data = (str(tcl_lib), "tcl")
+    else:
+        # Fallback for different Python/tcl versions
+        tcl_data = None
+except:
+    tcl_data = None
+
 datas = [
     (str(spec_dir / "version.txt"), "."),
 ]
+
+# Add tcl/tk data if found
+if tcl_data:
+    datas.append(tcl_data)
 
 assets_dir = spec_dir / "assets"
 if assets_dir.exists():
@@ -46,6 +63,7 @@ a = Analysis(
     datas=datas,
     hiddenimports=[
         "tkinter",
+        "tkinter.ttk",
         "reportlab",
         "reportlab.platypus",
         "reportlab.lib",
@@ -54,7 +72,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=["runtime_hook_tkinter.py"] if Path("runtime_hook_tkinter.py").exists() else [],
     excludedimports=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
